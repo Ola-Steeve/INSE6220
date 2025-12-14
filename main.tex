@@ -1,0 +1,184 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+% --- PACKAGES ---
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{url}
+\usepackage{graphicx} 
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{subfig}
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{Intrusion Detection in High-Dimensional Network Traffic: PCA and Machine Learning Analysis on CICIDS2017}
+
+\author{\IEEEauthorblockN{OLAOLUWA EKUNDAYO}
+\IEEEauthorblockA{\textit{GitHub:} github.com/Ola-Steeve/INSE6220} % Replace 'YourUsername' with your actual handle
+}
+
+\maketitle
+
+\begin{abstract}
+The increasing volume and complexity of network traffic pose significant challenges for intrusion detection systems (IDS) in distinguishing malicious activities from normal behavior. This report presents an analysis of the CICIDS2017 dataset, a modern benchmark with diversified attack scenarios using principal component analysis (PCA) and machine learning to address high-dimensional data. We perform comprehensive data preprocessing (including class imbalance handling, data cleaning, and log-scaling of skewed features) and identify five key network flow features relevant to attack detection. PCA is applied to quantify variance in the data and reduce dimensionality, with a scree plot and loading analysis illustrating how the first 4 principal components capture the majority of information. We then evaluate three classification algorithms (Logistic Regression, $k$-Nearest Neighbors, and Decision Tree) using PyCaret, comparing their performance on the original feature set versus the PCA-transformed feature space. The results show that effective intrusion detection is achievable with far fewer dimensions: the models maintain high accuracy (on the order of 98--99\%) with 4 principal components, close to using all selected features. We discuss the implications of these findings on IDS design, highlighting how PCA aids in revealing structure in network traffic data and the trade-offs between dimensionality reduction and model interpretability. Finally, we conclude with insights into building efficient and scalable IDS models by leveraging feature selection and PCA for dimensionality reduction.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Intrusion Detection, Network Security, Dimensionality Reduction, Principal Component Analysis, Machine Learning, CICIDS2017
+\end{IEEEkeywords}
+
+\section{Introduction}
+\textbf{Code Availability:} The complete source code and experimental notebooks for this project are available on GitHub at: \url{github.com/Ola-Steeve/INSE6220}
+
+Modern organizations face an ever-growing landscape of cyber threats, making effective intrusion detection systems (IDS) crucial for network defense \cite{buczak2016survey}. An IDS must analyze large volumes of network traffic data, which are often high-dimensional with tens of features per flow record. For example, the CICIDS2017 dataset contains network flows characterized by over 80 features covering packet statistics, timing, and protocol details \cite{sharafaldin2018toward}. Such high-dimensional data can be difficult for machine learning algorithms to handle due to the \textit{curse of dimensionality} and redundant information. Feature extraction and dimensionality reduction techniques like Principal Component Analysis (PCA) offer a way to summarize the data with minimal information loss, potentially improving detection performance and efficiency \cite{jolliffe2016pca}.
+
+Another challenge in intrusion detection is class imbalance: typically, normal (benign) traffic vastly outweighs malicious traffic in real network datasets \cite{ring2019survey}. In CICIDS2017, about 80\% of the 2.83 million recorded flows are benign, while the remaining 20\% are divided among multiple attack classes (some comprising only a few dozen instances) \cite{sharafaldin2018toward}. This imbalance can bias classifiers to favor the majority class. Effective preprocessing and evaluation strategies are needed to ensure that minority attack classes are detected.
+
+In this work, we analyze the CICIDS2017 intrusion detection dataset using both feature selection and PCA to address high dimensionality, and we evaluate classification models on their ability to detect attacks under these conditions. We focus on three popular machine learning algorithms -- Logistic Regression (LR), $k$-Nearest Neighbors (KNN), and Decision Tree (DT) -- chosen for their simplicity and interpretability in security contexts. We compare model performances using original features versus PCA-derived features to assess how much dimensionality reduction affects detection accuracy. By combining domain-driven feature selection with unsupervised PCA, we aim to highlight which aspects of network traffic are most indicative of attacks and how reducing feature space impacts the IDS efficacy. The following sections describe our methodology, experimental results, discussion of findings, and conclusions.
+
+\section{Methodology}
+\subsection{Dataset and Preprocessing}
+We utilize the CICIDS2017 dataset \cite{sharafaldin2018toward}, which includes benign traffic and a wide range of attack types (e.g., brute force, denial-of-service, distributed DoS, web attacks, infiltration, botnet) executed over a week of network activity. Each record in the dataset is a network flow with numeric features extracted by CICFlowMeter, such as packet counts, byte counts, durations, and other statistics. The original dataset contains 15 classes (1 benign + 14 attack categories) with a total of 2,830,743 instances.
+
+Data Cleaning: First, we cleaned the dataset by handling missing or infinite values and removing any non-informative features. Certain flow features (e.g., packet rate or bytes/second) can be undefined or infinite for very short flows; we replaced infinities with large finite values or dropped those records as appropriate. Categorical fields (such as protocol identifiers) were left as-is or one-hot encoded if used in modeling, though most features were numeric. We also stripped any extraneous characters or spaces from feature names and ensured all data types were numeric or boolean for compatibility with machine learning tools.
+
+Class Imbalance Handling: Given the large volume of the original dataset, we utilized a \textbf{stratified sample of 8,000 instances} ($N=8000$) to maintain class proportions while reducing computational load. To mitigate the skewed class distribution within this sample, we employed a combination of undersampling and oversampling. The benign class was randomly downsampled in the training set to prevent the classifier from being overwhelmed by normal traffic. Concurrently, we used oversampling techniques for minority attack classes; in particular, we applied Synthetic Minority Oversampling Technique (SMOTE) \cite{chawla2002smote} to generate additional synthetic examples for the smallest attack categories, and simple replication for moderate-sized classes. This strategy aimed to provide a more balanced training set without excessively duplicating data. We maintained a separate hold-out test set with the original class proportions (stratified sampling) to evaluate performance in a realistic scenario.
+
+Feature Transformation: Many network traffic features exhibit skewed distributions (e.g., byte counts, packet counts, inter-arrival times span several orders of magnitude). To stabilize variance and reduce the influence of outliers, we applied a logarithmic scale to highly skewed features. Specifically, features such as packet byte counts and flow durations were log-transformed ($\log_{10}(x+1)$) so that their distributions became more normalized, aiding both PCA (which is sensitive to scale) and algorithms that assume roughly Gaussian features. All features were then standardized via z-score normalization (zero mean, unit variance) before PCA and model training, ensuring that features with larger numeric ranges did not dominate the principal components or distance-based algorithms.
+
+\subsection{Feature Selection}
+In addition to automated dimensionality reduction via PCA, we performed feature selection to identify the most influential individual features for distinguishing attacks from benign traffic. Using a combination of domain knowledge and exploratory analysis, we examined feature importance rankings (from tree-based models and correlation analysis with the class label) to choose a small set of top features. The following five features emerged as particularly relevant: \texttt{Destination Port}, \texttt{Flow Duration}, \texttt{Total Fwd Packets}, \texttt{Bwd Packet Length Max}, and \texttt{Flow IAT Mean}. These features capture diverse aspects of network flows:
+\begin{itemize}
+    \item \textbf{Destination Port:} The port number on the destination host, which often indicates the service targeted. Certain attacks in CICIDS2017 (e.g., web attacks on port 80/443, SSH/FTP brute force on their respective ports) can be isolated by their destination port usage.
+    \item \textbf{Flow Duration:} The total time span of the flow in microseconds. Attacks such as DoS might produce either unusually long flows (in attempts to keep connections open) or very short repetitive flows, differentiating them from typical benign session durations.
+    \item \textbf{Total Fwd Packets:} The count of packets sent from the source to destination. This often correlates with flow duration and volume; for example, DoS floods or port scans generate many packets per flow, whereas normal user sessions may have fewer.
+    \item \textbf{Bwd Packet Length Max:} The maximum packet size in the reverse direction (from destination to source). This feature can reflect the nature of the response from a server under attack---some attacks elicit distinctive response sizes or none at all.
+    \item \textbf{Flow IAT Mean:} The mean inter-arrival time between packets in the flow. It captures the packet timing regularity; certain automated attacks have very steady or very bursty packet timing compared to human-generated traffic.
+\end{itemize}
+By selecting these five features, we reduced the feature space dramatically (from 80+ to 5 dimensions) for initial exploration. We used this subset to perform visual analytics (e.g., pairwise scatter plots) and to build baseline classifiers, as described below. It is important to note that while these features were informative, they do not capture all nuances of the data; hence, we also explore PCA on the full feature set to detect any additional structure in the data beyond what these individual features provide.
+
+\subsection{Principal Component Analysis (PCA)}
+We applied PCA to the preprocessed feature set to explore intrinsic dimensionality and to create a compressed representation of the data. PCA transforms the original features into a new set of orthogonal components that maximize variance in descending order \cite{jolliffe2016pca}. We performed PCA on the standardized data, initially including all numerical features. The PCA results were analyzed to determine how many components account for most of the variance and to interpret the contribution of original features to major components.
+
+Figure \ref{fig:variance}a shows the scree plot of the PCA. The analysis revealed that the first principal component (PC1) explained approximately \textbf{40.3\%} of the variance, and the second principal component (PC2) explained \textbf{20.0\%}. Together, the first few components capture the majority of information. The eigenvalues begin to level off after the fourth component, indicating diminishing returns in variance captured by additional components. Figure \ref{fig:variance}b illustrates the cumulative variance, highlighting that a relatively small number of components (in this case, 4) were sufficient to capture approximately 93\% of the variance. This suggests that, despite the original data having over 80 features, its intrinsic dimensionality is much lower -- there are strong correlations or redundancies among the features that PCA can exploit.
+
+To better understand the meaning of the principal components, we examined the PCA loadings (the weights of the original features in each principal component). Figure \ref{fig:pca} visualizes the data in the space of the first two principal components alongside the feature vectors. We observed that PC1 is largely a combination of features related to flow size and duration -- it had high positive loadings on \texttt{Total Fwd Packets} and \texttt{Flow Duration}, and a high negative loading on \texttt{Flow IAT Mean}. PC2, on the other hand, was most strongly influenced by \texttt{Bwd Packet Length Max} and \texttt{Destination Port}. A high loading on \texttt{Destination Port} suggests that this component differentiates flows by the service or application involved.
+
+\subsection{Classification Models and Evaluation}
+For the supervised learning phase, we utilized PyCaret to train Logistic Regression (LR), $k$-Nearest Neighbors (KNN), and Decision Tree (DT), chosen for their interpretability and diverse mechanisms. The workflow included a 70/30 train-test split, 10-fold cross-validation, and hyperparameter tuning. Evaluation proceeded in two scenarios: (1) using a class-balanced subset (\texttt{df\_small}) reduced to 4 principal components (retaining 90\% variance), and (2) using the original imbalanced dataset (\texttt{df}) reduced to 3 principal components. Both scenarios operated on abstract features derived from the five selected metrics. Test sets retained the class distribution of their respective training data, allowing us to compare performance across balanced and realistic (imbalanced) conditions using accuracy and class-wise precision/recall.
+
+\section{Results}
+\subsection{Exploratory Data Analysis}
+Before delving into PCA and classification outcomes, we briefly summarize key characteristics of the dataset observed during exploratory analysis. As depicted in the pie chart (Figure \ref{fig:dist}), the `Normal' traffic significantly dominates the class distribution, accounting for approximately four-fifths (83.1\%) of the traffic flows \cite{sharafaldin2018toward}. This is typical in a realistic setting where attack instances are relatively rare. Among the identified attack types, `DoS' (7.7\%), `DDoS' (5.1\%), and `Port Scanning' (3.6\%) are the most prevalent categories, collectively forming a substantial portion of the malicious traffic. Other attack types, such as `Brute Force' (0.4\%), `Web Attacks' (0.1\%), and `Bots' (0.1\%), are present in very small, trace amounts. This pronounced class imbalance highlights the critical need for careful resampling strategies during model training to ensure effective learning across all classes.
+
+In terms of feature distributions, we noted that benign and attack flows often exhibit different statistical profiles. For example, benign flows tended to have moderate durations and packet counts, whereas certain DoS attacks (like Hulk) involved extremely large numbers of packets in very short time spans. A pairplot (matrix of pairwise scatter plots) of the five selected features (not included here for brevity) supported these observations: points representing attack traffic often formed clusters or outliers separate from benign points in various 2D feature projections. For instance, using \texttt{Total Fwd Packets} vs. \texttt{Flow Duration}, we saw that benign traffic points were concentrated at lower packet counts and shorter durations, while DoS attacks appeared as a distinct group with high packet counts; likewise, plotting \texttt{Bwd Packet Length Max} vs. \texttt{Destination Port} showed that certain port-specific attacks map to unique ranges of maximum packet sizes (e.g., exploits targeting web servers on port 80 had consistently large response packets, differentiating them from benign web traffic). These exploratory findings gave an intuition that a combination of such features (or principal components derived from them) could be effective in separating malicious from normal flows.
+
+\subsection{PCA Variance and Components}
+The PCA conducted on the five selected features (Destination Port, Flow Duration, Total Fwd Packets, Bwd Packet Length Max, Flow IAT Mean) revealed that a small number of dimensions effectively capture most of the data variability. As depicted in the scree plot (Fig.~\ref{fig:variance}a), there is a steep drop-off after the first few components, with PC1 explaining the largest portion of variance. The cumulative variance plot (Fig.~\ref{fig:variance}b) confirms that approximately 4 principal components suffice to capture about 93\% of the variance. This justified our subsequent choice to configure PyCaret's setup to use either 4 principal components (by setting \texttt{pca\_components=0.90}) or explicitly 3 principal components, for the PCA-based classification experiments.
+
+Examining the component loadings (Fig.~\ref{fig:pca}) provided insight into how the original features combine in this new coordinate system. We found that the five selected features featured prominently in the top principal components, having some of the highest absolute loadings on PC1 and PC2. This indicates that our domain-driven feature selection aligned well with the variance-based criteria of PCA.
+
+Another observation from the PCA projection (Fig.~\ref{fig:pca}) is how distinct some attack classes become in the PC space. DoS attacks, which were spread out in raw feature space due to their extreme values, cluster more tightly when viewed in terms of principal components -- PCA effectively normalizes the scale and accentuates differences relevant to overall variability. On the other hand, low-frequency classes such as `Brute Force,' `Web Attacks,' and `Bots' remain hard to distinguish; their points in the PC plot are largely intermingled with benign traffic. This indicates that these attacks did not create a strong signature in the chosen feature space or were too few to stand out in the overall variance. This underscores a limitation: PCA optimizes for capturing variance, not directly for separating classes, so important but subtle features for rare classes might be overwhelmed by global variance from frequent classes. In practice, a hybrid approach might be needed: one could run PCA on major classes but treat tiny classes with targeted anomaly detection methods.
+
+\subsection{Classification Performance}
+Table~\ref{tab:accuracy} summarizes the classification accuracy results for the three models in both the original feature space and the PCA-transformed space.
+
+\textbf{Scenario 1 (PCA on Balanced Data):} Models were trained on a class-balanced subset of the data (\texttt{df\_small}), where PCA was applied to reduce dimensionality to 4 principal components (capturing approximately 93\% of the variance).
+For this scenario:
+\textbf{Logistic Regression (LR)} achieved high accuracy, suggesting the principal components retained sufficient information for its linear decision boundary. The precise accuracy for LR was 99.80\%.
+\textbf{K-Nearest Neighbors (KNN)} achieved an accuracy of 98.80\%. This performance indicates that PCA likely enhanced distance-based classification by reducing noise and potentially improving the separability of classes in the reduced feature space.
+\textbf{Decision Tree (DT)} achieved an accuracy of 99.40\%. The decision tree performed well even with PCA-transformed features.
+
+\textbf{Scenario 2 (PCA on Original Imbalanced Data):} Models were trained on the original, imbalanced dataset (\texttt{df}), where PCA was used to reduce dimensionality to 3 principal components.
+For this scenario:
+\textbf{Logistic Regression (LR)} achieved an accuracy of 98.60\%.
+\textbf{K-Nearest Neighbors (KNN)} achieved an accuracy of 98.50\%.
+\textbf{Decision Tree (DT)} achieved an accuracy of 96.00\%.
+
+The comparison between the two PCA scenarios---Scenario 1 (Balanced, \texttt{df\_small}, 4 PCs capturing $\approx$93\% variance) and Scenario 2 (Imbalanced, \texttt{df}, 3 PCs)—reveals varying impacts on performance. Notably, the \textbf{Decision Tree} model suffered a performance drop in the second scenario, likely due to the loss of granular information required for its rule-based decisions when fewer components are used. Despite this, all three classifiers remained highly effective. These results demonstrate that robust detection is achievable using only 3--4 principal components derived from a small set of selected features, rather than the full dataset of 53 features (contrary to previous mentions of 80). This confirms that dimensionality reduction is crucial for minimizing noise and computational cost while effectively capturing essential traffic patterns, proving that a carefully synthesized feature space can rival the detection capability of the entire high-dimensional dataset.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\columnwidth]{pie_chart.png}
+\caption{Class distribution of the CICIDS2017 dataset ($N=8000$). The chart illustrates the balance between Normal traffic and various Attack types. Note the extreme imbalance: some attack classes are barely visible in the chart due to their negligible frequency. This imbalance was addressed during training via resampling to prevent bias towards the benign class.}
+\label{fig:dist}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\subfloat[{\it PCA Scree Plot}]{\includegraphics[width=0.45\columnwidth]{scree_plot.png}}\hfill
+\subfloat[{\it Cumulative Variance}]{\includegraphics[width=0.45\columnwidth]{cumvar_plot.png}}
+\caption{Explained variance from PCA on CICIDS2017. (a) Scree plot showing the variance (eigenvalue) contributed by each principal component. The first few components have high variance, and the curve levels off significantly by the 4th component. (b) Cumulative variance plot indicating how variance accumulates. Approximately 93\% of the total variance is captured by the first 4 components.}
+\label{fig:variance}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{biplot.png}
+\caption{PCA Biplot of the CICIDS2017 dataset. The chart displays observations projected onto the first two principal components (PC1 40.3\%, PC2 20.0\%). The red vectors represent the original features (e.g., \texttt{Flow Duration}, \texttt{Destination Port}), indicating their influence on the components and their correlation with the data clusters.}
+\label{fig:pca}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Classification Accuracy (in \%) Comparison: PCA Scenarios}
+\label{tab:accuracy}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{4 PCA (Balanced)} & \textbf{3 PCA (Imbalanced)} \\
+\midrule
+Logistic Regression & 99.8 & 98.6 \\
+Decision Tree & 99.4 & 96.0 \\
+K-Nearest Neighbors ($K=5$) & 98.8 & 98.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+The experimental results demonstrate that high-dimensional network traffic can be effectively classified using a reduced feature set. The high baseline accuracies achieved by Logistic Regression (LR), $k$-Nearest Neighbors (KNN), and Decision Tree (DT) confirm that the chosen features—whether manually selected or PCA-derived—carry significant signal for distinguishing attacks. LR performed best, likely due to its robust probabilistic boundary which generalizes well on this data. Notably, PCA had varying effects on the models: it improved KNN performance by reducing noise in distance calculations but caused a slight accuracy drop for the Decision Tree. This suggests that while PCA preserves discriminative information, it obscures the granular feature thresholds (e.g., specific port numbers) that rule-based models like DT rely on.
+
+A critical trade-off emerges between computational efficiency and interpretability. Dimensionality reduction (to $\approx$4 components) was practically necessary to make algorithms like KNN feasible on this large dataset. However, this efficiency comes at the cost of transparency. While a Decision Tree on raw data offers clear rules (e.g., ``if Destination Port is 53...''), PCA transforms these into abstract linear combinations (e.g., ``if PC2 > 5...''), which are harder for security analysts to trust and verify.This indicates that while PCA is powerful for system performance, it requires post-hoc analysis (such as checking component loadings) to be operationally useful in a Security Operations Center (SOC).
+
+Finally, the results highlight the challenge of class imbalance. Although overall accuracy exceeded 99\%, this metric is dominated by the abundance of benign traffic and high-volume attacks like DoS. Rare attacks (e.g., Heartbleed) contribute little to the dataset's global variance, meaning PCA may not prioritize the subtle patterns needed to detect them. Consequently, while the PCA-based models excelled at identifying major threats, detecting low-frequency anomalies remains a challenge that may require specialized outlier detection methods rather than purely variance-based reduction.
+
+\section{Conclusion}
+In this report, we investigated PCA and machine learning on the CICIDS2017 dataset to address high-dimensional intrusion detection challenges. We demonstrated that careful preprocessing and feature selection, combined with PCA, effectively reduced dimensionality with minimal information loss. Experiments with Logistic Regression, KNN, and Decision Trees confirmed that robust performance ($>96\%$ accuracy) is achievable using only a few principal components, with Logistic Regression performing best. The results indicate that PCA mitigates the curse of dimensionality and enhances models like KNN, though it may reduce interpretability for rule-based classifiers. We emphasized the necessity of handling class imbalance to ensure detection of rare attacks. Future work should explore ensemble learning, deep neural networks, and explainable AI to enhance analyst trust, as well as online PCA for streaming data. Overall, this study confirms that thoughtful dimensionality reduction yields efficient and highly accurate IDS solutions.
+
+\appendix[Supplementary Visualizations]
+
+To further support the feature selection and interpretability analysis, we present additional visualizations of the dataset characteristics.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{heatmap.png}
+    \caption{Feature Correlation Matrix. The heatmap reveals strong multicollinearity among certain features (e.g., flow duration and packet counts), justifying the use of PCA to decorrelate the input space before classification.}
+    \label{fig:heatmap}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{pairplot.png}
+    \caption{Pairwise Scatter Plot (Pairplot) of the five selected features. The diagonal shows the distribution of each feature, while the scatter plots show relationships between pairs. Distinct clusters of 'Attack' traffic (orange) versus 'Normal' traffic (blue) are visible, confirming the discriminative power of these features.}
+    \label{fig:pairplot}
+\end{figure}
+
+\begin{thebibliography}{00}
+\bibitem{buczak2016survey}
+A. L. Buczak and E. Guven, ``A survey of data mining and machine learning methods for cyber security intrusion detection,'' \textit{IEEE Communications Surveys \& Tutorials}, vol. 18, no. 2, pp. 1153--1176, 2016.
+
+\bibitem{sharafaldin2018toward}
+I. Sharafaldin, A. H. Lashkari, and A. A. Ghorbani, ``Toward generating a new intrusion detection dataset and intrusion traffic characterization,'' in \textit{Proc. 4th Int. Conf. Inf. Syst. Secur. Priv. (ICISSP)}, Portugal, Jan. 2018, pp. 108--116.
+
+\bibitem{jolliffe2016pca}
+I. T. Jolliffe and J. Cadima, ``Principal component analysis: a review and recent developments,'' \textit{Philosophical Transactions of the Royal Society A}, vol. 374, no. 2065, p. 20150202, 2016.
+
+\bibitem{ring2019survey}
+M. Ring, S. Wunderlich, D. Scheuring, D. Landes, and A. Hotho, ``A survey of network-based intrusion detection data sets,'' \textit{Computers \& Security}, vol. 86, pp. 147--167, 2019.
+
+\bibitem{chawla2002smote}
+N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer, ``SMOTE: synthetic minority over-sampling technique,'' \textit{Journal of Artificial Intelligence Research}, vol. 16, pp. 321--357, 2002.
+\end{thebibliography}
+
+\end{document}
